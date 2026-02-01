@@ -1,0 +1,91 @@
+seed: 1
+num_worker: 8
+work_dir: ./work_dir/my_dataset/SkateFormer_22j/
+
+phase: train
+
+# -------------------------
+# Feeder (你需要写一个自己的 feeder：feeders/feeder_my22.py)
+# 目标：输出数据 shape = (C,T,V,M) = (3,T,22,1)
+# -------------------------
+feeder: feeders.feeder_GTOP_22.Feeder
+train_feeder_args:
+  data_path: /mnt/data_hdd/fzhi/skateformer_data/dataset_22j.npz
+  split: train
+  data_type: j
+  aug_method: '123456789'   # 你要哪些增强就开哪些
+  intra_p: 0.5
+  inter_p: 0.0
+  window_size: 64
+  p_interval: 1
+  thres: 64
+  uniform: False
+  partition: False
+  num_point: 22
+  num_people: 1
+  root_center: True
+  root_idx: 0
+
+test_feeder_args:
+  data_path: /mnt/data_hdd/fzhi/skateformer_data/dataset_22j.npz
+  split: test
+  data_type: j
+  window_size: 64
+  p_interval: 1
+  thres: 64
+  uniform: False
+  partition: False
+  num_point: 22
+  num_people: 1
+  root_center: True
+  root_idx: 0
+
+
+# -------------------------
+# Model
+# -------------------------
+model: model.SkateFormer.SkateFormer_
+model_args:
+  num_classes: 999        # TODO: 改成你的动作类别数
+  num_people: 1
+  num_points: 22          # 关键：你的 joint 数
+  kernel_size: 7
+  num_heads: 32
+  attn_drop: 0.5
+  head_drop: 0.0
+  rel: True
+  drop_path: 0.2
+  type_1_size: [8, 4]
+  type_2_size: [8, 5]
+  type_3_size: [8, 4]
+  type_4_size: [8, 5]
+  mlp_ratio: 1.0
+  index_t: True
+
+  # ====== 新增：用 kin_parent 建图（版本1需要）======
+  kin_parent_path: /mnt/data_hdd/fzhi/human_data/101010/brooming/test_results/pca_20_sigma_2.00/kin_parent.npy
+  edges_from_kin_parent: True   # 你在代码里可用这个开关（可选）
+
+# -------------------------
+# Optim
+# -------------------------
+optimizer: AdamW
+weight_decay: 0.1
+lr_scheduler: cosine
+base_lr: 1e-3
+min_lr: 1e-5
+warmup_lr: 1e-7
+warmup_prefix: False
+warm_up_epoch: 25
+
+# -------------------------
+# Training
+# -------------------------
+device: [0]
+batch_size: 128
+test_batch_size: 128
+num_epoch: 500
+nesterov: True
+grad_clip: True
+grad_max: 1.0
+loss_type: LSCE
