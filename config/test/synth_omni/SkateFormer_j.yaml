@@ -1,0 +1,70 @@
+seed: 1
+num_worker: 4
+work_dir: ./work_dir/synth_omni/SkateFormer_j/
+
+phase: test
+weights: ./work_dir/synth_omni/SkateFormer_j/best_model.pt
+
+# feeder
+feeder: feeders.feeder_GTOP_22.Feeder
+train_feeder_args:
+  data_path: ./data/synth_omni/SYNTH_OMNI.npz
+  split: train
+  debug: False
+  window_size: 64
+  p_interval: [0.5, 1]
+  aug_method: '123568'
+  intra_p: 0.5
+  inter_p: 0.0
+  thres: 64
+  uniform: True
+  partition: False
+  num_point: 12
+  num_dim: 3
+  num_people: 1
+  root_center: True
+  root_idx: 6
+
+test_feeder_args:
+  data_path: ./data/synth_omni/SYNTH_OMNI.npz
+  split: test
+  window_size: 64
+  p_interval: [0.95]
+  thres: 64
+  uniform: True
+  partition: False
+  num_point: 12
+  num_dim: 3
+  num_people: 1
+  root_center: True
+  root_idx: 6
+  debug: False
+
+# model
+model: model.SkateFormer.SkateFormer_
+model_args:
+  num_classes: 13
+  num_people: 1
+  num_points: 12
+  kernel_size: 7
+  num_heads: 16
+  attn_drop: 0.3
+  head_drop: 0.0
+  rel: True
+  drop_path: 0.1
+  type_1_size: [8, 4]
+  type_2_size: [8, 6]
+  type_3_size: [8, 4]
+  type_4_size: [8, 6]
+  mlp_ratio: 4.0
+  index_t: True
+
+# training (needed for test config loading)
+device: [0]
+batch_size: 64
+test_batch_size: 64
+num_epoch: 200
+nesterov: True
+grad_clip: True
+grad_max: 1.0
+loss_type: LSCE
