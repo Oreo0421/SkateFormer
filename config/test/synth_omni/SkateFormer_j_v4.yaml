@@ -1,32 +1,33 @@
 seed: 1
 num_worker: 4
-work_dir: ./work_dir/synth_omni_v2/SkateFormer_j/
+work_dir: ./work_dir/synth_omni_v4/SkateFormer_j/
 
 phase: test
-weights: ./work_dir/synth_omni_v2/SkateFormer_j/best_model.pt
+weights: ./work_dir/synth_omni_v4/SkateFormer_j/best_model.pt
 
-# feeder
+# feeder — v4: root_center=True, aug_method=1234568, intra_p=0.6
 feeder: feeders.feeder_GTOP_22.Feeder
 train_feeder_args:
-  data_path: ./data/synth_omni/SYNTH_OMNI_v2.npz
+  data_path: ./data/synth_omni/SYNTH_OMNI_v3.npz
   split: train
   debug: False
   window_size: 64
   p_interval: [0.5, 1]
-  aug_method: '12356'
-  intra_p: 0.5
+  aug_method: '1234568'
+  intra_p: 0.6
   inter_p: 0.0
   thres: 64
   uniform: True
   partition: False
   num_point: 12
-  num_dim: 2
+  num_dim: 3
   num_people: 1
-  root_center: False
+  root_center: True
   root_idx: 6
+  project_2d: True
 
 test_feeder_args:
-  data_path: ./data/synth_omni/SYNTH_OMNI_v2.npz
+  data_path: ./data/synth_omni/SYNTH_OMNI_v3.npz
   split: test
   window_size: 64
   p_interval: [0.95]
@@ -34,10 +35,11 @@ test_feeder_args:
   uniform: True
   partition: False
   num_point: 12
-  num_dim: 2
+  num_dim: 3
   num_people: 1
-  root_center: False
+  root_center: True
   root_idx: 6
+  project_2d: True
   debug: False
 
 # model
@@ -49,10 +51,10 @@ model_args:
   num_points: 12
   kernel_size: 7
   num_heads: 16
-  attn_drop: 0.3
-  head_drop: 0.0
+  attn_drop: 0.5
+  head_drop: 0.1
   rel: True
-  drop_path: 0.1
+  drop_path: 0.2
   type_1_size: [8, 4]
   type_2_size: [8, 6]
   type_3_size: [8, 4]
@@ -64,7 +66,7 @@ model_args:
 device: [0]
 batch_size: 64
 test_batch_size: 64
-num_epoch: 200
+num_epoch: 300
 nesterov: True
 grad_clip: True
 grad_max: 1.0

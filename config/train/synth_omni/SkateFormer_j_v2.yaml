@@ -19,9 +19,9 @@ train_feeder_args:
   uniform: True
   partition: False
   num_point: 12
-  num_dim: 3
+  num_dim: 2
   num_people: 1
-  root_center: False    # already centered in preprocessing
+  root_center: False
   root_idx: 6
 
 test_feeder_args:
@@ -33,7 +33,7 @@ test_feeder_args:
   uniform: True
   partition: False
   num_point: 12
-  num_dim: 3
+  num_dim: 2
   num_people: 1
   root_center: False
   root_idx: 6
@@ -42,6 +42,7 @@ test_feeder_args:
 # model
 model: model.SkateFormer.SkateFormer_
 model_args:
+  in_channels: 2
   num_classes: 13
   num_people: 1
   num_points: 12
