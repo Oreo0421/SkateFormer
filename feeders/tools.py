@@ -7,6 +7,70 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
+def rotate_3d_project_2d(data_numpy, hip_idx=(6, 7), shoulder_idx=(0, 1)):
+    """Random 3D rotation + project to 2D with re-normalization.
+
+    Input:  (C=3, T, V, M) — 3D skeleton (hip-centered, torso-scaled)
+    Output: (C=2, T, V, M) — 2D projected skeleton (re-normalized)
+
+    Rotation strategy:
+      - Azimuth (around Y, vertical): uniform 0–360° for full view diversity
+      - Elevation (around X): ±20° for camera height variation
+      - Roll (around Z): ±10° for minor tilt
+    """
+    C, T, V, M = data_numpy.shape
+    if C < 3:
+        return data_numpy.copy()
+
+    az = math.radians(random.uniform(0, 360))
+    el = math.radians(random.uniform(-20, 20))
+    ro = math.radians(random.uniform(-10, 10))
+
+    ca, sa = math.cos(az), math.sin(az)
+    ce, se = math.cos(el), math.sin(el)
+    cr, sr = math.cos(ro), math.sin(ro)
+
+    Ry = np.array([[ca, 0, -sa], [0, 1, 0], [sa, 0, ca]])
+    Rx = np.array([[1, 0, 0], [0, ce, se], [0, -se, ce]])
+    Rz = np.array([[cr, sr, 0], [-sr, cr, 0], [0, 0, 1]])
+    R = Rz @ Rx @ Ry
+
+    temp = data_numpy.transpose(1, 2, 3, 0)  # (T, V, M, 3)
+    temp = np.dot(temp, R.T)
+    rotated = temp.transpose(3, 0, 1, 2)  # (3, T, V, M)
+
+    proj = rotated[:2].copy()  # (2, T, V, M)
+
+    lh, rh = hip_idx
+    ls, rs = shoulder_idx
+    for m_idx in range(M):
+        p = proj[:, :, :, m_idx]  # (2, T, V)
+        hip_c = (p[:, :, lh:lh+1] + p[:, :, rh:rh+1]) / 2.0
+        p = p - hip_c
+
+        sh_c = (p[:, :, ls:ls+1] + p[:, :, rs:rs+1]) / 2.0
+        torso = np.sqrt((sh_c ** 2).sum(axis=0))  # (T, 1)
+        valid = torso > 1e-6
+        if valid.any():
+            scale = float(np.median(torso[valid]))
+        else:
+            scale = 1.0
+        scale = max(scale, 1e-6)
+        p = p / scale
+        proj[:, :, :, m_idx] = p
+
+    return proj
+
+
+def project_to_2d(data_numpy):
+    """Simply take first 2 channels (X, Y) from 3D data.
+    Used for test-time (no rotation).
+    Input:  (C>=2, T, V, M)
+    Output: (C=2, T, V, M)
+    """
+    return data_numpy[:2].copy()
+
+
 def valid_crop_resize(data_numpy, valid_frame_num, p_interval, window, thres):
     # input: C,T,V,M
     C, T, V, M = data_numpy.shape
@@ -110,14 +174,19 @@ def valid_crop_uniform(data_numpy, valid_frame_num, p_interval, window, thres):
 
 def scale(data_numpy, scale=0.2, p=0.5):
     if random.random() < p:
-        scale = 1 + np.random.uniform(-1, 1, size=(3, 1, 1, 1)) * np.array(scale)
+        C = data_numpy.shape[0]
+        scale = 1 + np.random.uniform(-1, 1, size=(C, 1, 1, 1)) * np.array(scale)
         return data_numpy * scale
     else:
         return data_numpy.copy()
 
 
 ''' AimCLR '''
-transform_order = {'ntu': [0, 1, 2, 3, 8, 9, 10, 11, 4, 5, 6, 7, 16, 17, 18, 19, 12, 13, 14, 15, 20, 23, 24, 21, 22]}
+transform_order = {
+    'ntu': [0, 1, 2, 3, 8, 9, 10, 11, 4, 5, 6, 7, 16, 17, 18, 19, 12, 13, 14, 15, 20, 23, 24, 21, 22],
+    # 12-joint: left<->right swap (0,1), (2,3), (4,5), (6,7), (8,9), (10,11)
+    'gtop12': [1, 0, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10],
+}
 
 
 def subtract(data_numpy, p=0.5):
@@ -145,18 +214,14 @@ def temporal_flip(data_numpy, index_t, p=0.5):
 
 def spatial_flip(data_numpy, p=0.5):
     if random.random() < p:
-        index = transform_order['ntu']
+        V = data_numpy.shape[2]
+        index = transform_order['gtop12'] if V == 12 else transform_order['ntu']
         return data_numpy[:, :, index, :]
     else:
         return data_numpy.copy()
 
 
 def rotate(data_numpy, axis=None, angle=None, p=0.5):
-    if axis != None:
-        axis_next = axis
-    else:
-        axis_next = random.randint(0, 2)
-
     if angle != None:
         angle_next = random.uniform(-angle, angle)
     else:
@@ -164,22 +229,29 @@ def rotate(data_numpy, axis=None, angle=None, p=0.5):
 
     if random.random() < p:
         temp = data_numpy.copy()
+        C = temp.shape[0]
         angle = math.radians(angle_next)
-        # x
-        if axis_next == 0:
-            R = np.array([[1, 0, 0],
-                          [0, math.cos(angle), math.sin(angle)],
-                          [0, -math.sin(angle), math.cos(angle)]])
-        # y
-        if axis_next == 1:
-            R = np.array([[math.cos(angle), 0, -math.sin(angle)],
-                          [0, 1, 0],
-                          [math.sin(angle), 0, math.cos(angle)]])
-        # z
-        if axis_next == 2:
-            R = np.array([[math.cos(angle), math.sin(angle), 0],
-                          [-math.sin(angle), math.cos(angle), 0],
-                          [0, 0, 1]])
+
+        if C == 2:
+            R = np.array([[math.cos(angle), math.sin(angle)],
+                          [-math.sin(angle), math.cos(angle)]])
+        else:
+            if axis != None:
+                axis_next = axis
+            else:
+                axis_next = random.randint(0, 2)
+            if axis_next == 0:
+                R = np.array([[1, 0, 0],
+                              [0, math.cos(angle), math.sin(angle)],
+                              [0, -math.sin(angle), math.cos(angle)]])
+            elif axis_next == 1:
+                R = np.array([[math.cos(angle), 0, -math.sin(angle)],
+                              [0, 1, 0],
+                              [math.sin(angle), 0, math.cos(angle)]])
+            else:
+                R = np.array([[math.cos(angle), math.sin(angle), 0],
+                              [-math.sin(angle), math.cos(angle), 0],
+                              [0, 0, 1]])
         R = R.transpose()
         temp = np.dot(temp.transpose([1, 2, 3, 0]), R)
         temp = temp.transpose(3, 0, 1, 2)
@@ -191,18 +263,25 @@ def rotate(data_numpy, axis=None, angle=None, p=0.5):
 def shear(data_numpy, s1=None, s2=None, p=0.5):
     if random.random() < p:
         temp = data_numpy.copy()
-        if s1 != None:
-            s1_list = s1
-        else:
-            s1_list = [random.uniform(-0.5, 0.5), random.uniform(-0.5, 0.5), random.uniform(-0.5, 0.5)]
-        if s2 != None:
-            s2_list = s2
-        else:
-            s2_list = [random.uniform(-0.5, 0.5), random.uniform(-0.5, 0.5), random.uniform(-0.5, 0.5)]
+        C = temp.shape[0]
 
-        R = np.array([[1, s1_list[0], s2_list[0]],
-                      [s1_list[1], 1, s2_list[1]],
-                      [s1_list[2], s2_list[2], 1]])
+        if C == 2:
+            s = s1 if s1 is not None else [random.uniform(-0.5, 0.5)]
+            R = np.array([[1, s[0]],
+                          [s[0], 1]])
+        else:
+            if s1 != None:
+                s1_list = s1
+            else:
+                s1_list = [random.uniform(-0.5, 0.5), random.uniform(-0.5, 0.5), random.uniform(-0.5, 0.5)]
+            if s2 != None:
+                s2_list = s2
+            else:
+                s2_list = [random.uniform(-0.5, 0.5), random.uniform(-0.5, 0.5), random.uniform(-0.5, 0.5)]
+            R = np.array([[1, s1_list[0], s2_list[0]],
+                          [s1_list[1], 1, s2_list[1]],
+                          [s1_list[2], s2_list[2], 1]])
+
         R = R.transpose()
         temp = np.dot(temp.transpose([1, 2, 3, 0]), R)
         temp = temp.transpose(3, 0, 1, 2)
@@ -212,10 +291,11 @@ def shear(data_numpy, s1=None, s2=None, p=0.5):
 
 
 def drop_axis(data_numpy, axis=None, p=0.5):
+    C = data_numpy.shape[0]
     if axis != None:
         axis_next = axis
     else:
-        axis_next = random.randint(0, 2)
+        axis_next = random.randint(0, C - 1)
 
     if random.random() < p:
         temp = data_numpy.copy()
@@ -234,22 +314,24 @@ def drop_joint(data_numpy, joint_list=None, time_range=None, p=0.5):
 
         if joint_list != None:
             all_joints = [i for i in range(V)]
-            joint_list_ = random.sample(all_joints, joint_list)
+            n_j = min(joint_list, V)
+            joint_list_ = random.sample(all_joints, n_j)
             joint_list_ = sorted(joint_list_)
         else:
-            random_int = random.randint(5, 15)
+            n_j = min(random.randint(5, 15), V)
             all_joints = [i for i in range(V)]
-            joint_list_ = random.sample(all_joints, random_int)
+            joint_list_ = random.sample(all_joints, n_j)
             joint_list_ = sorted(joint_list_)
 
         if time_range != None:
             all_frames = [i for i in range(T)]
-            time_range_ = random.sample(all_frames, time_range)
+            n_t = min(time_range, T)
+            time_range_ = random.sample(all_frames, n_t)
             time_range_ = sorted(time_range_)
         else:
-            random_int = random.randint(16, 32)
+            n_t = min(random.randint(16, 32), T)
             all_frames = [i for i in range(T)]
-            time_range_ = random.sample(all_frames, random_int)
+            time_range_ = random.sample(all_frames, n_t)
             time_range_ = sorted(time_range_)
 
         x_new = np.zeros((C, len(time_range_), len(joint_list_), M))

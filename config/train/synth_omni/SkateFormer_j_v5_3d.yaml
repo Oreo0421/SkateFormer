@@ -1,0 +1,97 @@
+seed: 1
+num_worker: 4
+work_dir: ./work_dir/synth_omni_v5_3d/SkateFormer_j/
+
+phase: train
+
+# ── Feeder ──────────────────────────────────────────────────────────────────
+# 训练: 合成 SMPL 3D world coords (SYNTH_3D.npz, 用 prepare_data_v2.py --use_3d 生成)
+# 测试: CameraHMR 提取的 OmniLab 3D joints (SYNTH_3D_OMNI_test.npz)
+#
+# 生成训练 NPZ (在有合成数据的机器上执行):
+#   cd /home/fzhi/fzt/skateformer/SkateFormer
+#   python data/synth_omni/prepare_data_v2.py \
+#       --use_3d --viewpoints top \
+#       --output ./data/synth_omni/SYNTH_3D.npz
+#
+# 生成测试 NPZ (在 camerahmr 环境里执行):
+#   cd /home/fzhi/fzt/CameraHMR
+#   conda activate camerahmr
+#   python /home/fzhi/fzt/skateformer/SkateFormer/data/synth_omni/run_camerahmr_omni_3d.py
+feeder: feeders.feeder_GTOP_22.Feeder
+
+train_feeder_args:
+  data_path: ./data/synth_omni/SYNTH_3D.npz
+  split: train
+  debug: False
+  window_size: 64
+  p_interval: [0.5, 1]
+  aug_method: '123456'    # 3D 下 rotate/shear/scale/spatial_flip/temporal_flip/gaussian_noise 全开
+  intra_p: 0.5
+  inter_p: 0.0
+  thres: 64
+  uniform: True
+  partition: False
+  num_point: 12
+  num_dim: 3
+  num_people: 1
+  root_center: True       # hip-center (与 normalize_skeleton 一致)
+  root_idx: 6             # left_hip 在 12-joint 骨架中的索引
+  project_2d: False       # 3D 训练，不投影
+
+test_feeder_args:
+  data_path: ./data/synth_omni/SYNTH_3D.npz
+  split: test
+  window_size: 64
+  p_interval: [0.95]
+  thres: 64
+  uniform: True
+  partition: False
+  num_point: 12
+  num_dim: 3
+  num_people: 1
+  root_center: True
+  root_idx: 6
+  project_2d: False
+  debug: False
+
+# ── Model ───────────────────────────────────────────────────────────────────
+model: model.SkateFormer.SkateFormer_
+model_args:
+  in_channels: 3          # xyz 三通道
+  num_classes: 13
+  num_people: 1
+  num_points: 12
+  kernel_size: 7
+  num_heads: 16
+  attn_drop: 0.5
+  head_drop: 0.1
+  rel: True
+  drop_path: 0.2
+  type_1_size: [8, 4]
+  type_2_size: [8, 6]
+  type_3_size: [8, 4]
+  type_4_size: [8, 6]
+  mlp_ratio: 4.0
+  index_t: True
+
+# ── Optimizer ───────────────────────────────────────────────────────────────
+optimizer: AdamW
+weight_decay: 0.1
+lr_scheduler: cosine
+base_lr: 3e-4
+min_lr: 1e-6
+warmup_lr: 1e-7
+warmup_prefix: False
+warm_up_epoch: 20
+
+# ── Training ────────────────────────────────────────────────────────────────
+device: [0]
+batch_size: 64
+test_batch_size: 64
+num_epoch: 150
+eval_interval: 10
+nesterov: True
+grad_clip: True
+grad_max: 1.0
+loss_type: LSCE

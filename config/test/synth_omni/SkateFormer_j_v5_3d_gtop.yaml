@@ -1,19 +1,19 @@
 seed: 1
 num_worker: 4
-work_dir: ./work_dir/synth_omni_v3/SkateFormer_j/
+work_dir: ./work_dir/synth_omni_v5_3d/SkateFormer_j/
 
 phase: test
-weights: ./work_dir/synth_omni_v3/SkateFormer_j/runs-150-4350.pt
+weights: ./work_dir/synth_omni_v5_3d/SkateFormer_j/best_model.pt
 
-# feeder
 feeder: feeders.feeder_GTOP_22.Feeder
+
 train_feeder_args:
-  data_path: ./data/synth_omni/SYNTH_OMNI_v3.npz
+  data_path: ./data/synth_omni/SYNTH_3D.npz
   split: train
   debug: False
   window_size: 64
   p_interval: [0.5, 1]
-  aug_method: '12356'
+  aug_method: '123456'
   intra_p: 0.5
   inter_p: 0.0
   thres: 64
@@ -22,12 +22,12 @@ train_feeder_args:
   num_point: 12
   num_dim: 3
   num_people: 1
-  root_center: False
+  root_center: True
   root_idx: 6
-  project_2d: True
+  project_2d: False
 
 test_feeder_args:
-  data_path: ./data/synth_omni/SYNTH_OMNI_v3.npz
+  data_path: ./data/synth_omni/SYNTH_3D.npz
   split: test
   window_size: 64
   p_interval: [0.95]
@@ -37,16 +37,15 @@ test_feeder_args:
   num_point: 12
   num_dim: 3
   num_people: 1
-  root_center: False
+  root_center: True
   root_idx: 6
-  project_2d: True
+  project_2d: False
   debug: False
-  test_key: x_test
+  test_key: x_test_gtop
 
-# model
 model: model.SkateFormer.SkateFormer_
 model_args:
-  in_channels: 2
+  in_channels: 3
   num_classes: 13
   num_people: 1
   num_points: 12
@@ -63,11 +62,10 @@ model_args:
   mlp_ratio: 4.0
   index_t: True
 
-# training (needed for config loading)
 device: [0]
 batch_size: 64
 test_batch_size: 64
-num_epoch: 300
+num_epoch: 150
 nesterov: True
 grad_clip: True
 grad_max: 1.0

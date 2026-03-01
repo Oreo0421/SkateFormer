@@ -42,7 +42,11 @@ class Feeder(Dataset):
                  num_people=1,
                  # normalize
                  root_center=True,
-                 root_idx=0):
+                 root_idx=0,
+                 # 3D rotate + project to 2D
+                 project_2d=False,
+                 # 选择 test NPZ 中的哪个 split key (x_test / x_test_gtop / x_test_omni)
+                 test_key='x_test'):
 
         self.debug = debug
         self.data_path = data_path
@@ -64,6 +68,8 @@ class Feeder(Dataset):
 
         self.root_center = bool(root_center)
         self.root_idx = int(root_idx)
+        self.project_2d = bool(project_2d)
+        self.test_key = test_key
 
         self.load_data()
 
@@ -85,8 +91,10 @@ class Feeder(Dataset):
             self.label = np.where(npz_data['y_train'] > 0)[1]
             self.sample_name = ['train_' + str(i) for i in range(len(self.data))]
         elif self.split == 'test':
-            self.data = npz_data['x_test']
-            self.label = np.where(npz_data['y_test'] > 0)[1]
+            x_key = self.test_key
+            y_key = x_key.replace('x_', 'y_')
+            self.data = npz_data[x_key]
+            self.label = np.where(npz_data[y_key] > 0)[1]
             self.sample_name = ['test_' + str(i) for i in range(len(self.data))]
         else:
             raise NotImplementedError('data split only supports train/test')
@@ -231,7 +239,14 @@ class Feeder(Dataset):
             else:
                 data_numpy = data_numpy.copy()
 
-        # modality (same as NTU) :contentReference[oaicite:5]{index=5}
+        # 3D rotate + project to 2D
+        if self.project_2d:
+            if self.split == 'train':
+                data_numpy = tools.rotate_3d_project_2d(data_numpy)
+            else:
+                data_numpy = tools.project_to_2d(data_numpy)
+
+        # modality (same as NTU)
         if self.data_type == 'b':
             j2b = tools.joint2bone()
             data_numpy = j2b(data_numpy)
@@ -244,7 +259,6 @@ class Feeder(Dataset):
         else:
             data_numpy = data_numpy.copy()
 
-        # partition disabled for now
         return data_numpy, index_t, label, index
 
     def top_k(self, score, top_k):

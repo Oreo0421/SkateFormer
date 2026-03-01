@@ -1,0 +1,100 @@
+seed: 1
+num_worker: 4
+work_dir: ./work_dir/synth_omni_v6_canonical/SkateFormer_j/
+
+phase: train
+
+# ── Feeder ──────────────────────────────────────────────────────────────────
+# 训练: canonical 3D 坐标 (SYNTH_3D_canonical.npz)
+#   脊柱 → +Y，左右肩 → +X，hip 在原点，torso-scale 归一化
+#
+# 测试: SAM-3D-Body 提取的 OmniLab 3D joints (SYNTH_3D_SAM3D_test.npz)
+#   同样做 canonical 归一化（run_sam3d_omni.py 中完成）
+#
+# 生成训练 NPZ:
+#   conda activate skateformer
+#   python data/synth_omni/make_canonical.py
+#
+# 生成测试 NPZ (在 sam_3d_body 环境里执行):
+#   cd /home/fzhi/fzt/sam-3d-body
+#   conda activate sam_3d_body
+#   python /home/fzhi/fzt/skateformer/SkateFormer/data/synth_omni/run_sam3d_omni.py
+feeder: feeders.feeder_GTOP_22.Feeder
+
+train_feeder_args:
+  data_path: ./data/synth_omni/SYNTH_3D_canonical.npz
+  split: train
+  debug: False
+  window_size: 64
+  p_interval: [0.5, 1]
+  aug_method: '12356'    # 1=shear 2=rotate 3=scale 5=temporal_flip 6=gaussian_noise
+                         # 去掉 4(spatial_flip): canonical frame 下左右有固定含义
+  intra_p: 0.5
+  inter_p: 0.0
+  thres: 64
+  uniform: True
+  partition: False
+  num_point: 12
+  num_dim: 3
+  num_people: 1
+  root_center: False     # canonical 归一化已 hip-center，不再重复
+  root_idx: 6
+  project_2d: False
+
+test_feeder_args:
+  data_path: ./data/synth_omni/SYNTH_3D_canonical.npz
+  split: test
+  window_size: 64
+  p_interval: [0.95]
+  thres: 64
+  uniform: True
+  partition: False
+  num_point: 12
+  num_dim: 3
+  num_people: 1
+  root_center: False
+  root_idx: 6
+  project_2d: False
+  debug: False
+  test_key: x_test_gtop   # 训练中用 gtop test 监控
+
+# ── Model ───────────────────────────────────────────────────────────────────
+model: model.SkateFormer.SkateFormer_
+model_args:
+  in_channels: 3
+  num_classes: 13
+  num_people: 1
+  num_points: 12
+  kernel_size: 7
+  num_heads: 16
+  attn_drop: 0.5
+  head_drop: 0.1
+  rel: True
+  drop_path: 0.2
+  type_1_size: [8, 4]
+  type_2_size: [8, 6]
+  type_3_size: [8, 4]
+  type_4_size: [8, 6]
+  mlp_ratio: 4.0
+  index_t: True
+
+# ── Optimizer ───────────────────────────────────────────────────────────────
+optimizer: AdamW
+weight_decay: 0.1
+lr_scheduler: cosine
+base_lr: 3e-4
+min_lr: 1e-6
+warmup_lr: 1e-7
+warmup_prefix: False
+warm_up_epoch: 20
+
+# ── Training ────────────────────────────────────────────────────────────────
+device: [0]
+batch_size: 64
+test_batch_size: 64
+num_epoch: 150
+eval_interval: 10
+nesterov: True
+grad_clip: True
+grad_max: 1.0
+loss_type: LSCE

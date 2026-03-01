@@ -10,7 +10,7 @@ import sys
 import time
 from collections import OrderedDict
 import traceback
-from sklearn.metrics import confusion_matrix
+from sklearn.metrics import confusion_matrix, precision_score, recall_score, f1_score
 import csv
 import numpy as np
 import glob
@@ -187,6 +187,20 @@ class Processor():
             num_workers=self.arg.num_worker,
             drop_last=False,
             worker_init_fn=init_seed)
+
+        # 如果 NPZ 里有 gtop / omni 两个 split，额外加载
+        _npz = np.load(self.arg.test_feeder_args['data_path'], allow_pickle=True)
+        for split_name, x_key in [('test_gtop', 'x_test_gtop'), ('test_omni', 'x_test_omni')]:
+            if x_key in _npz.files:
+                extra_args = dict(self.arg.test_feeder_args)
+                extra_args['test_key'] = x_key
+                self.data_loader[split_name] = torch.utils.data.DataLoader(
+                    dataset=Feeder(**extra_args),
+                    batch_size=self.arg.test_batch_size,
+                    shuffle=False,
+                    num_workers=self.arg.num_worker,
+                    drop_last=False,
+                    worker_init_fn=init_seed)
 
     def load_model(self):
         output_device = self.arg.device[0] if type(self.arg.device) is list else self.arg.device
@@ -412,6 +426,12 @@ class Processor():
             if accuracy > self.best_acc:
                 self.best_acc = accuracy
                 self.best_acc_epoch = epoch + 1
+                # 保存最佳模型，避免训练结束时找不到对应 epoch 的 checkpoint
+                state_dict = self.model.state_dict()
+                weights = OrderedDict([[k.split('module.')[-1], v.cpu()] for k, v in state_dict.items()])
+                best_path = os.path.join(self.arg.work_dir, 'best_model.pt')
+                torch.save(weights, best_path)
+                self.print_log('\tNew best! Saved to {}'.format(best_path))
 
             print('Accuracy: ', accuracy, ' model: ', self.arg.model_saved_name)
             if self.arg.phase == 'train':
@@ -434,6 +454,15 @@ class Processor():
             # acc for each class:
             label_list = np.concatenate(label_list)
             pred_list = np.concatenate(pred_list)
+
+            # Prec / Rec / F1 (在 concatenate 之后)
+            prec = precision_score(label_list, pred_list, average='macro', zero_division=0)
+            rec  = recall_score(label_list, pred_list, average='macro', zero_division=0)
+            f1   = f1_score(label_list, pred_list, average='macro', zero_division=0)
+            self.print_log(
+                f'\t{ln}: Acc={accuracy*100:.2f}%  Prec={prec*100:.2f}%  '
+                f'Rec={rec*100:.2f}%  F1={f1*100:.2f}%  ({len(label_list)} samples)'
+            )
             confusion = confusion_matrix(label_list, pred_list)
             list_diag = np.diag(confusion)
             list_raw_sum = np.sum(confusion, axis=1)
@@ -452,15 +481,25 @@ class Processor():
                 return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
             self.print_log(f'# Parameters: {count_parameters(self.model)}')
+            eval_every = self.arg.eval_interval  # default 5
             for epoch in range(self.arg.start_epoch, self.arg.num_epoch):
-                if epoch + 1 < self.arg.num_epoch * 0.9:
-                    self.train(epoch, save_model=False)
-                else:
-                    self.train(epoch, save_model=True)
-                    self.eval(epoch, save_score=True, loader_name=['test'])
+                save = (epoch + 1) >= self.arg.num_epoch * 0.9
+                self.train(epoch, save_model=save)
+                if (epoch + 1) % eval_every == 0 or save:
+                    self.eval(epoch, save_score=save, loader_name=['test'])
 
             # test the best model
-            weights_path = glob.glob(os.path.join(self.arg.work_dir, 'runs-' + str(self.best_acc_epoch) + '*'))[0]
+            best_path = os.path.join(self.arg.work_dir, 'best_model.pt')
+            if os.path.exists(best_path):
+                weights_path = best_path
+            else:
+                candidates = glob.glob(os.path.join(self.arg.work_dir, 'runs-' + str(self.best_acc_epoch) + '*'))
+                if not candidates:
+                    raise FileNotFoundError(
+                        'Best model not found. best_acc_epoch={}, work_dir={}. '
+                        'Ensure best_model.pt exists or runs-{}-*.pt was saved.'.format(
+                            self.best_acc_epoch, self.arg.work_dir, self.best_acc_epoch))
+                weights_path = candidates[0]
             weights = torch.load(weights_path)
             if type(self.arg.device) is list:
                 if len(self.arg.device) > 1:
@@ -470,7 +509,12 @@ class Processor():
             wf = weights_path.replace('.pt', '_wrong.txt')
             rf = weights_path.replace('.pt', '_right.txt')
             self.arg.print_log = False
-            self.eval(epoch=0, save_score=True, loader_name=['test'], wrong_file=wf, result_file=rf)
+            eval_loaders = ['test']
+            if 'test_gtop' in self.data_loader:
+                eval_loaders.append('test_gtop')
+            if 'test_omni' in self.data_loader:
+                eval_loaders.append('test_omni')
+            self.eval(epoch=0, save_score=True, loader_name=eval_loaders, wrong_file=wf, result_file=rf)
             self.arg.print_log = True
 
             num_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
@@ -493,7 +537,12 @@ class Processor():
             self.arg.print_log = False
             self.print_log('Model:   {}.'.format(self.arg.model))
             self.print_log('Weights: {}.'.format(self.arg.weights))
-            self.eval(epoch=0, save_score=self.arg.save_score, loader_name=['test'], wrong_file=wf, result_file=rf)
+            eval_loaders = ['test']
+            if 'test_gtop' in self.data_loader:
+                eval_loaders.append('test_gtop')
+            if 'test_omni' in self.data_loader:
+                eval_loaders.append('test_omni')
+            self.eval(epoch=0, save_score=self.arg.save_score, loader_name=eval_loaders, wrong_file=wf, result_file=rf)
             self.print_log('Done.\n')
 
 
